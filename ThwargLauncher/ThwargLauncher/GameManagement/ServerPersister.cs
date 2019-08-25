@@ -32,7 +32,6 @@ namespace ThwargLauncher.GameManagement
             public ServerModel.SecureEnum SecureSetting;
             public ServerModel.VisibilityEnum VisibilitySetting;
             public ServerModel.ServerSourceEnum ServerSource;
-            public bool LoginEnabled; // TODO - what is this?
         }
         public class PublishedServerLocalInfo
         {
@@ -44,12 +43,14 @@ namespace ThwargLauncher.GameManagement
         private const string PublishedGDLServerListFilename = "PublishedGDLServerList.xml";
         private const string PublishedACEServerListFilename = "PublishedACEACServerList.xml";
         private const string PublishedDFServerListFilename = "PublishedDFACServerList.xml";
+        private const string PublishedWildWestServerListFilename = "PublishedWildWestServerList.xml";
         private const string LocalPublishedGDLServerInfosFilename = "PublishedServerInfo.xml";
         private const string UserServerListFilename = "UserServerList.xml";
         private string _serverDataFolder;
         private string _publishedGDLServersFilepath;
         private string _publishedACEServersFilepath;
         private string _publishedDFServersFilepath;
+        private string _publishedWildWestServersFilepath;
         private string _localPublishedGDLServersInfoFilepath;
         private string _userServersFilepath;
 
@@ -59,6 +60,7 @@ namespace ThwargLauncher.GameManagement
             _publishedGDLServersFilepath = Path.Combine(_serverDataFolder, PublishedGDLServerListFilename);
             _publishedACEServersFilepath = Path.Combine(_serverDataFolder, PublishedACEServerListFilename);
             _publishedDFServersFilepath = Path.Combine(_serverDataFolder, PublishedDFServerListFilename);
+            _publishedWildWestServersFilepath = Path.Combine(_serverDataFolder, PublishedWildWestServerListFilename);
             _localPublishedGDLServersInfoFilepath = Path.Combine(_serverDataFolder, LocalPublishedGDLServerInfosFilename);
             _userServersFilepath = Path.Combine(_serverDataFolder, UserServerListFilename);
         }
@@ -66,7 +68,7 @@ namespace ThwargLauncher.GameManagement
         internal IEnumerable<ServerData> ReadUserServers()
         {
             string filepath = _userServersFilepath;
-            ServerModel.ServerEmuEnum emu = ServerModel.ServerEmuEnum.GDL;
+            ServerModel.ServerEmuEnum emu = ServerModel.ServerEmuEnum.GDLE;
             var servers = ReadServerList(ServerModel.ServerSourceEnum.User, emu, filepath);
             return servers;
         }
@@ -83,14 +85,10 @@ namespace ThwargLauncher.GameManagement
                             new XElement("GameApiUrlKey", server.GameApiUrl),
                             new XElement("LoginServerUrlKey", server.LoginServerUrl),
                             new XElement("enable_login", "true"),
-                            new XElement("custom_credentials", "true"),
                             new XElement("emu", server.EMU),
                             new XElement("default_rodat", server.RodatSetting),
                             new XElement("default_secure", server.SecureSetting),
-                            new XElement("visibility", server.VisibilitySetting),
-                            new XElement("default_username", "username"),
-                            new XElement("default_password", "password"),
-                            new XElement("allow_dual_log", "true")
+                            new XElement("visibility", server.VisibilitySetting)
                             );
             return xelem;
         }
@@ -119,7 +117,6 @@ namespace ThwargLauncher.GameManagement
                             si.ServerName = GetSubvalue(node, "name");
                             si.ServerAlias = GetOptionalSubvalue(node, "alias", null);
                             si.ServerDesc = GetSubvalue(node, "description");
-                            si.LoginEnabled = StringToBool(GetOptionalSubvalue(node, "enable_login", "true"));
                             si.ConnectionString = GetSubvalue(node, "connect_string");
                             si.GameApiUrl = GetOptionalSubvalue(node, "GameApiUrlKey", "");
                             si.LoginServerUrl = GetOptionalSubvalue(node, "LoginServerUrlKey", "");
@@ -181,9 +178,8 @@ namespace ThwargLauncher.GameManagement
                             si.ServerAlias = info.Alias;
                             si.ServerDesc = GetSubvalue(node, "description");
                             si.DiscordUrl = GetSubvalue(node, "DiscordUrl");
-                            si.LoginEnabled = StringToBool(GetOptionalSubvalue(node, "enable_login", "true"));
                             si.ConnectionString = GetSubvalue(node, "connect_string");
-                            si.EMU = ServerModel.ServerEmuEnum.GDL;
+                            si.EMU = ServerModel.ServerEmuEnum.GDLE;
                             si.ServerSource = ServerModel.ServerSourceEnum.Published;
                             string rodatstr = GetSubvalue(node, "default_rodat");
                             si.RodatSetting = ParseRodat(rodatstr, defval: ServerModel.RodatEnum.Off);
@@ -238,9 +234,9 @@ namespace ThwargLauncher.GameManagement
                             si.ServerId = info.Id;
                             si.ServerAlias = info.Alias;
                             si.ServerDesc = GetSubvalue(node, "description");
-                            si.LoginEnabled = StringToBool(GetOptionalSubvalue(node, "enable_login", "true"));
+                            si.DiscordUrl = GetSubvalue(node, "DiscordUrl");
                             si.ConnectionString = GetSubvalue(node, "connect_string");
-                            si.EMU = ServerModel.ServerEmuEnum.Ace;
+                            si.EMU = ServerModel.ServerEmuEnum.ACE;
                             si.ServerSource = ServerModel.ServerSourceEnum.Published;
                             string rodatstr = GetSubvalue(node, "default_rodat");
                             si.RodatSetting = ParseRodat(rodatstr, defval: ServerModel.RodatEnum.Off);
@@ -280,6 +276,13 @@ namespace ThwargLauncher.GameManagement
             SavePublishedServerInfos(publishedServerInfos);
 
             return publishedServers;
+        }
+
+        public IEnumerable<ServerData> GetWildWestServerList()
+        {
+            DownloadWildWestServersToCacheIfPossible();
+            var wildWestServers = ReadServerList(ServerModel.ServerSourceEnum.User, ServerModel.ServerEmuEnum.GDLE, _publishedWildWestServersFilepath);
+            return wildWestServers;
         }
 
         private PublishedServerInfoMap LoadPublishedServerInfos()
@@ -418,6 +421,27 @@ namespace ThwargLauncher.GameManagement
             catch (Exception exc)
             {
                 Logger.WriteInfo("Unable to download Published DF Server List: " + exc.ToString());
+            }
+        }
+
+        private void DownloadWildWestServersToCacheIfPossible()
+        {
+            try
+            {
+                string filepath = _publishedWildWestServersFilepath;
+                var url = Properties.Settings.Default.WildWestServerListUrl;
+                string xmlStr;
+                using (var wc = new WebClient())
+                {
+                    xmlStr = wc.DownloadString(url);
+                }
+                var xmlDoc = new XmlDocument();
+                xmlDoc.LoadXml(xmlStr);
+                xmlDoc.Save(filepath);
+            }
+            catch (Exception exc)
+            {
+                Logger.WriteInfo("Unable to download Published Wild West Server List: " + exc.ToString());
             }
         }
 

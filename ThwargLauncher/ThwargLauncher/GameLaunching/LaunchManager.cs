@@ -2,8 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
-using System.Linq;
-using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ThwargLauncher
 {
@@ -16,6 +15,7 @@ namespace ThwargLauncher
         {
             public bool Success;
             public int ProcessId;
+            public IntPtr Hwnd;
         }
         public delegate void ReportStatusHandler(string status, LaunchItem launchItem);
         public event ReportStatusHandler ReportStatusEvent;
@@ -45,24 +45,8 @@ namespace ThwargLauncher
             {
                 return result;
             }
-            DateTime lastLaunchUtc = (_accountLaunchTimes.ContainsKey(_launchItem.AccountName)
-                                       ? _accountLaunchTimes[_launchItem.AccountName]
-                                       : DateTime.MinValue);
-            // Add a 5 second delay before launching the same account. EMU servers won't have cross-server timouts like Live servers did.
-            TimeSpan delay = new TimeSpan(0, 0, 5) - (DateTime.UtcNow - lastLaunchUtc);
-            GameLaunchResult gameLaunchResult = null;
-            while (delay.TotalMilliseconds > 0)
-            {
-                if (worker.CancellationPending)
-                {
-                    return result;
-                }
-                string context = string.Format("Waiting {0} sec", (int)delay.TotalSeconds + 1);
-                ReportStatus(context, _launchItem);
 
-                System.Threading.Thread.Sleep(1000);
-                delay = new TimeSpan(0, 0, 5) - (DateTime.UtcNow - lastLaunchUtc);
-            }
+            GameLaunchResult gameLaunchResult = null;
 
             ReportStatus("Launching", _launchItem);
             _accountLaunchTimes[_launchItem.AccountName] = DateTime.UtcNow;
@@ -73,7 +57,6 @@ namespace ThwargLauncher
             try
             {
                 var finder = new ThwargUtils.WindowFinder();
-                finder.RecordExistingWindows();
                 string launcherPath = GetLaunchItemLauncherLocation(_launchItem);
                 OverridePreferenceFile(_launchItem.CustomPreferencePath);
                 gameLaunchResult = launcher.LaunchGameClient(
@@ -95,18 +78,23 @@ namespace ThwargLauncher
                 {
                     return result;
                 }
-                string gameCaptionPattern = ConfigSettings.GetConfigString("GameCaptionPattern", null);
-                if (gameCaptionPattern != null)
+                var regex = GetGameWindowCaptionRegex();
+                if (regex != null)
                 {
-                    var regex = new System.Text.RegularExpressions.Regex(gameCaptionPattern);
-                    IntPtr hwnd = finder.FindNewWindow(regex);
+                    IntPtr hwnd = finder.FindWindowByCaptionAndProcessId(regex, newWindow: true, processId: gameLaunchResult.ProcessId);
                     if (hwnd != IntPtr.Zero)
                     {
+                        result.Hwnd = hwnd;
                         string newGameTitle = GetNewGameTitle(_launchItem);
                         if (!string.IsNullOrEmpty(newGameTitle))
                         {
+                            Logger.WriteDebug("Found hwnd: " + newGameTitle);
                             finder.SetWindowTitle(hwnd, newGameTitle);
                         }
+                    }
+                    else
+                    {
+                        Logger.WriteDebug("Unable to find hwnd");
                     }
                 }
             }
@@ -121,6 +109,19 @@ namespace ThwargLauncher
                 result.ProcessId = gameLaunchResult.ProcessId;
             }
             return result;
+        }
+        private static Regex GetGameWindowCaptionRegex()
+        {
+            string gameCaptionPattern = ConfigSettings.GetConfigString("GameCaptionPattern", null);
+            if (gameCaptionPattern != null)
+            {
+                var regex = new System.Text.RegularExpressions.Regex(gameCaptionPattern);
+                return regex;
+            }
+            else
+            {
+                return null;
+            }
         }
         private void OverridePreferenceFile(string customPreferencePath)
         {
@@ -159,22 +160,21 @@ namespace ThwargLauncher
         }
         private string GetNewGameTitle(LaunchItem launchItem)
         {
+            string pattern = ConfigSettings.GetConfigString("NewGameTitle", "");
             if (launchItem.CharacterSelected == "None")
             {
-                string pattern = ConfigSettings.GetConfigString("NewGameTitleNoChar", "");
-                pattern = pattern.Replace("%ACCOUNT%", launchItem.AccountName);
-                pattern = pattern.Replace("%SERVER%", launchItem.ServerName);
-                return pattern;
-
+                pattern = ConfigSettings.GetConfigString("NewGameTitleNoChar", "");
             }
-            else
+            string alias = launchItem.Alias;
+            if (string.IsNullOrEmpty(alias)) { alias = launchItem.AccountName; } // fall back to account if no alias
+            pattern = pattern.Replace("%ALIAS%", alias);
+            pattern = pattern.Replace("%ACCOUNT%", launchItem.AccountName);
+            pattern = pattern.Replace("%SERVER%", launchItem.ServerName);
+            if (launchItem.CharacterSelected != "None")
             {
-                string pattern = ConfigSettings.GetConfigString("NewGameTitle", "");
-                pattern = pattern.Replace("%ACCOUNT%", launchItem.AccountName);
-                pattern = pattern.Replace("%SERVER%", launchItem.ServerName);
                 pattern = pattern.Replace("%CHARACTER%", launchItem.CharacterSelected);
-                return pattern;
             }
+            return pattern;
         }
     }
 }

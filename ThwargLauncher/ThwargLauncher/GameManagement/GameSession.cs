@@ -10,12 +10,15 @@ namespace ThwargLauncher
         public string AccountName;
         public string CharacterName;
         public int ProcessId;
+        public IntPtr WindowHwnd;
+        public string WindowPlacementString;
         public string ProcessIdKey;
         public string ProcessStatusFilepath;
         public int UptimeSeconds = -1;
         public ServerAccountStatusEnum Status = ServerAccountStatusEnum.None;
         public DateTime LastGoodStatusUtc = DateTime.MinValue;
         public ThwargFilter.Channels.Channel GameChannel;
+        public bool hasRestoredWindowLocation = false;
         public void AssignTeamSetFromString(string teamlist)
         {
             if (teamlist == _teamList) { return; }

@@ -27,6 +27,7 @@ namespace ThwargLauncher
         private TimeSpan _cleanupInterval = new TimeSpan(0, 5, 0); // 5 minutes
         private const int TIMER_SECONDS = 3;
         private const int CHARACTERFILE_CHECK_SECONDS = 30;
+        private const int GAMECLIENTLOCATIONS_CHECK_SECONDS = 10;
         private DateTime _lastReadProcesFilesUtc = DateTime.MinValue;
         private TimeSpan _rereadProcessFilesInterval = new TimeSpan(0, 1, 0); // 1 minute
         private DateTime _lastReadServerStatsUtc = DateTime.MinValue;
@@ -39,6 +40,7 @@ namespace ThwargLauncher
         private DateTime _lastCheckedCharacterFileUtc = DateTime.MinValue;
         private DateTime _characterFileTimeUtc = DateTime.MinValue;
         private DateTime _lastOnlineTimeUtc = DateTime.MinValue;
+        private DateTime _lastCheckedGameClientLocationsUtc = DateTime.MinValue;
 
         public enum GameChangeType { StartGame, EndGame, ChangeGame, ChangeStatus, ChangeTeam, ChangeNone };
         public delegate void GameChangeHandler(GameSession gameSession, GameChangeType changeType);
@@ -110,19 +112,23 @@ namespace ThwargLauncher
                 _isWorking = true;
                 if (ShouldWeCleanup())
                 {
-                    CleanupOldProcessFiles();
+                    PerformCleanupOldProcessFiles();
                 }
                 if (ShouldWeReadProcessFiles())
                 {
-                    ReadProcessFiles();
+                    PerformReadProcessFiles();
                 }
                 if (ShouldWeReadServerStats())
                 {
-                    ReadServerStats();
+                    PerformReadServerStats();
                 }
                 if (ShouldWeCheckCharacterFile())
                 {
-                    CheckCharacterFile();
+                    PerformCheckCharacterFile();
+                }
+                if (ShouldWeCheckGameClientLocations())
+                {
+                    PerformCheckGameClientLocations();
                 }
                 CheckLiveProcessFiles();
                 SendAndReceiveCommands();
@@ -235,10 +241,9 @@ namespace ThwargLauncher
             var elapsed = (DateTime.UtcNow - _lastCheckedCharacterFileUtc);
             return (elapsed.TotalSeconds > CHARACTERFILE_CHECK_SECONDS);
         }
-        private void CheckCharacterFile()
+        private void PerformCheckCharacterFile()
         {
-            string filepath = ThwargFilter.FileLocations.GetCharacterFilePath();
-            if (File.Exists(filepath))
+            foreach (string filepath in ThwargFilter.FileLocations.GetAllCharacterFilePaths())
             {
                 DateTime fileTimeUtc = File.GetLastWriteTimeUtc(filepath);
                 if (fileTimeUtc > _characterFileTimeUtc)
@@ -248,10 +253,119 @@ namespace ThwargLauncher
                     if (CharacterFileChanged != null)
                     {
                         CharacterFileChanged();
+                        break; // event handler will reread them all so no need to check the rest
                     }
                 }
             }
             _lastCheckedCharacterFileUtc = DateTime.UtcNow;
+        }
+        private bool ShouldWeCheckGameClientLocations()
+        {
+            var elapsed = (DateTime.UtcNow - _lastCheckedGameClientLocationsUtc);
+            return (elapsed.TotalSeconds > GAMECLIENTLOCATIONS_CHECK_SECONDS);
+        }
+        private void PerformCheckGameClientLocations()
+        {
+            foreach (var session in _map.GetAllGameSessions())
+            {
+                if (session.Status != ServerAccountStatusEnum.Running)
+                    continue;
+                
+                if (session.WindowHwnd == null || session.WindowHwnd == (IntPtr)0)
+                {
+                    if (session.ProcessId != 0)
+                    {
+                        LookForGameWindow(session);
+                    }
+                    continue;
+                }
+                if (!session.hasRestoredWindowLocation)
+                {
+                    TryToRestoreSessionPlacementInfo(session);
+                    session.hasRestoredWindowLocation = true;
+                }
+                else
+                {
+                    TryToSaveSessionPlacementInfo(session);
+                }
+            }
+            _lastCheckedGameClientLocationsUtc = DateTime.UtcNow;
+        }
+        private void TryToRestoreSessionPlacementInfo(GameSession session)
+        {
+            bool restoreWindows = Properties.Settings.Default.RestoreGameWindows;
+            if (!restoreWindows) { return; }
+            string key = GameMonitor.GetSessionSettingsKey(Server: session.ServerName, Account: session.AccountName);
+            var settings = PersistenceHelper.SettingsFactory.Get();
+            string placementString = settings.GetString(key);
+            IntPtr hwnd = session.WindowHwnd;
+            var prevPlacement = WindowPlacementUtil.WindowPlacement.GetPlacementFromString(placementString);
+            if (prevPlacement.length > 0)
+            {
+                var placementInfo = WindowPlacementUtil.WindowPlacement.GetPlacementInfo(hwnd);
+                if (AreSameNormalSize(prevPlacement, placementInfo.Placement))
+                {
+                    Logger.WriteDebug("Windows are same normal size.");
+                    WindowPlacementUtil.WindowPlacement.SetPlacement(hwnd, prevPlacement);
+                }
+                else
+                {
+                    Logger.WriteDebug("Windows are not the same normal size.");
+                    Logger.WriteDebug("PREVPLACEMENT - Height:" + GetNormalHeight(prevPlacement) + " width:" + GetNormalWidth(prevPlacement));
+                    Logger.WriteDebug("PLACEMENT - Height:" + GetNormalHeight(placementInfo.Placement) + " width:" + GetNormalWidth(placementInfo.Placement));
+                }
+            }
+            Logger.WriteDebug("Restored game position server: {0}, account: {1}", session.ServerName, session.AccountName);
+
+        }
+        private static bool AreSameNormalSize(WindowPlacementUtil.WINDOWPLACEMENT placement1, WindowPlacementUtil.WINDOWPLACEMENT placement2)
+        {
+            return GetNormalHeight(placement1) == GetNormalHeight(placement2) && GetNormalWidth(placement1) == GetNormalWidth(placement2);
+        }
+        private static int GetNormalHeight(WindowPlacementUtil.WINDOWPLACEMENT placement) { return placement.normalPosition.Bottom - placement.normalPosition.Top; }
+        private static int GetNormalWidth(WindowPlacementUtil.WINDOWPLACEMENT placement) { return placement.normalPosition.Right - placement.normalPosition.Left; }
+        private void TryToSaveSessionPlacementInfo(GameSession session)
+        {
+            if (!Properties.Settings.Default.SaveGameWindows) { return; }
+            var placementInfo = WindowPlacementUtil.WindowPlacement.GetPlacementInfo(session.WindowHwnd);
+            if (placementInfo.IsEmpty())
+            {
+                return;
+            }
+            string placementString = placementInfo.PlacementString;
+            if (placementString == session.WindowPlacementString)
+            {
+                return;
+            }
+            string key = GetSessionSettingsKey(session);
+            var settings = PersistenceHelper.SettingsFactory.Get();
+            settings.SetString(key, placementString);
+            settings.Save();
+            session.WindowPlacementString = placementString;
+        }
+        private void LookForGameWindow(GameSession session)
+        {
+            var finder = new ThwargUtils.WindowFinder();
+            IntPtr hwnd = finder.FindWindowByCaptionAndProcessId(regex: null, newWindow: false, processId: session.ProcessId);
+            if (hwnd != (IntPtr)0)
+            {
+                // Only save hwnd if window has been renamed, meaning launch completed
+                string gameCaptionPattern = ConfigSettings.GetConfigString("GameCaptionPattern", null);
+                string caption = ThwargUtils.WindowFinder.GetWindowTextString(hwnd);
+                if (caption != gameCaptionPattern)
+                {
+                    session.WindowHwnd = hwnd;
+                }
+            }
+
+        }
+        private string GetSessionSettingsKey(GameSession session)
+        {
+            return GetSessionSettingsKey(session.ServerName, session.AccountName);
+        }
+        public static string GetSessionSettingsKey(string Server, string Account)
+        {
+            return string.Format("s:{0}-a:{1}", Server, Account);
         }
         private void SendAndReceiveCommands()
         {
@@ -306,7 +420,7 @@ namespace ThwargLauncher
         /// Read all process files
         ///  Check if any characters have changed
         /// </summary>
-        private void ReadProcessFiles()
+        private void PerformReadProcessFiles()
         {
             foreach (var gameSession in _map.GetAllGameSessions())
             {
@@ -329,7 +443,7 @@ namespace ThwargLauncher
                     int gameInteractionTimeoutSeconds = ConfigSettings.GetConfigInt("GameInteractionTimeoutSeconds", 120);
                     // ThwargFilter reports !IsOnline if server dispatch quits firing
                     // but that isn't reliable, as it doesn't fire when not logged in to a character
-                    if ((DateTime.UtcNow - _lastOnlineTimeUtc).TotalSeconds > gameInteractionTimeoutSeconds)
+                    if (response.Status.LastServerDispatchSecondsAgo > gameInteractionTimeoutSeconds)
                     {
                         status = ServerAccountStatusEnum.None;
                         Logger.WriteInfo("Killing offline/character screen game");
@@ -394,7 +508,7 @@ namespace ThwargLauncher
             _lastReadProcesFilesUtc = DateTime.UtcNow;
         }
         class ServerPlayerCount { public string server; public string date; public int count; public string age; }
-        private void ReadServerStats()
+        private void PerformReadServerStats()
         {
             try
             {
@@ -500,7 +614,7 @@ namespace ThwargLauncher
                 }
             }
         }
-        private void CleanupOldProcessFiles()
+        private void PerformCleanupOldProcessFiles()
         {
             DirectoryInfo dir = new DirectoryInfo(ThwargFilter.FileLocations.GetRunningFolder());
             var filepathsToDelete = new List<string>();
@@ -610,8 +724,23 @@ namespace ThwargLauncher
                 string gamePath = gameSession.ProcessStatusFilepath;
                 if (File.Exists(gamePath))
                 {
-                    File.Delete(gamePath);
+                    TryToDeleteFile(gamePath);
                 }
+            }
+        }
+        private void TryToDeleteFile(string filepath)
+        {
+            for (int i = 0; i < 5; ++i)
+            {
+                try
+                {
+                    File.Delete(filepath);
+                    return;
+                }
+                catch
+                {
+                }
+                System.Threading.Thread.Sleep(100);
             }
         }
         /// <summary>
@@ -661,6 +790,25 @@ namespace ThwargLauncher
             {
                 KillSessionAndNotify(session);
             }
+        }
+        public void DisableWindowPosition(GameSession inboundGameSession)
+        {
+            Properties.Settings.Default.SaveGameWindows = false;
+            Properties.Settings.Default.RestoreGameWindows = false;
+            Properties.Settings.Default.Save();
+        }
+        public void LockWindowPosition(GameSession inboundGameSession)
+        {
+            TryToSaveSessionPlacementInfo(inboundGameSession);
+            Properties.Settings.Default.SaveGameWindows = false;
+            Properties.Settings.Default.RestoreGameWindows = true;
+            Properties.Settings.Default.Save();
+        }
+        public void UnlockWindowPosition(GameSession inboundGameSession)
+        {
+            Properties.Settings.Default.SaveGameWindows = true;
+            Properties.Settings.Default.RestoreGameWindows = true;
+            Properties.Settings.Default.Save();
         }
         public void RemoveGameByPid(int processId)
         {

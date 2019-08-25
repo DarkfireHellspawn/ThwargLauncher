@@ -59,11 +59,11 @@ namespace ThwargFilter
         /// </summary>
         public static void RecordLaunchInfo(string serverName, string accountName, string characterName, DateTime timestampUtc)
         {
-            string filepath = FileLocations.GetCurrentLaunchFilePath();
+            string filepath = FileLocations.GetCurrentLaunchFilePath(ServerName: serverName, AccountName: accountName);
             using (var file = new StreamWriter(filepath, append: false))
             {
                 file.WriteLine("FileVersion:{0}", LaunchInfo.MASTER_FILE_VERSION);
-                file.WriteLine("Timestamp=TimeUtc:'{0}'", timestampUtc);
+                file.WriteLine("Timestamp=TimeUtc:'{0:o}'", timestampUtc);
                 file.WriteLine("ServerName:{0}", serverName);
                 file.WriteLine("AccountName:{0}", accountName);
                 file.WriteLine("CharacterName:{0}", characterName);
@@ -81,7 +81,7 @@ namespace ThwargFilter
             var info = new LaunchInfo();
             try
             {
-                string filepath = FileLocations.GetCurrentLaunchFilePath();
+                string filepath = FileLocations.GetCurrentLaunchFilePath(ServerName: GameRepo.Game.Server, AccountName: GameRepo.Game.Account);
 
                 if (!File.Exists(filepath))
                 {
@@ -124,12 +124,12 @@ namespace ThwargFilter
         /// </summary>
         internal static void RecordLaunchResponse(DateTime timestampUtc)
         {
-            string filepath = FileLocations.GetCurrentLaunchResponseFilePath();
+            string filepath = FileLocations.GetCurrentLaunchResponseFilePath(ServerName: GameRepo.Game.Server, AccountName: GameRepo.Game.Account);
             using (var file = new StreamWriter(filepath, append: false))
             {
                 int pid = System.Diagnostics.Process.GetCurrentProcess().Id;
                 file.WriteLine("FileVersion:{0}", LaunchResponse.MASTER_FILE_VERSION);
-                file.WriteLine("TimeUtc:" + timestampUtc);
+                file.WriteLine("TimeUtc: {0:o}", timestampUtc);
                 file.WriteLine("ProcessId:{0}", pid);
                 file.WriteLine("ThwargFilterVersion:{0}", System.Reflection.Assembly.GetExecutingAssembly().GetName().Version);
             }
@@ -137,12 +137,12 @@ namespace ThwargFilter
         /// <summary>
         /// Called by ThwargLauncher
         /// </summary>
-        public static LaunchResponse GetLaunchResponse(TimeSpan maxLatency)
+        public static LaunchResponse GetLaunchResponse(string ServerName, string AccountName, TimeSpan maxLatency)
         {
             var info = new LaunchResponse();
             try
             {
-                string filepath = FileLocations.GetCurrentLaunchResponseFilePath();
+                string filepath = FileLocations.GetCurrentLaunchResponseFilePath(ServerName: ServerName, AccountName: AccountName);
                 if (string.IsNullOrEmpty(filepath)) { return info; }
                 if (!File.Exists(filepath)) { return info; }
 
@@ -157,7 +157,7 @@ namespace ThwargFilter
                 }
 
                 info.ResponseTime = SettingHelpers.GetSingleDateTimeValue(settings, "TimeUtc");
-                if (DateTime.UtcNow - info.ResponseTime >= maxLatency)
+                if (DateTime.UtcNow - info.ResponseTime.ToUniversalTime() >= maxLatency)
                 {
                     return info;
                 }
@@ -194,6 +194,7 @@ namespace ThwargFilter
                 stream.WriteLine("ThwargFilterVersion:{0}", assembly.GetName().Version);
                 stream.WriteLine("ThwargFilterFilePath:{0}", assembly.Location);
                 stream.WriteLine("IsOnline:{0}", status.IsOnline);
+                stream.WriteLine("LastServerDispatchSecondsAgo:{0}", status.LastServerDispatchSecondsAgo);
                 var text = stream.ToString();
                 return text;
             }
@@ -239,6 +240,7 @@ namespace ThwargFilter
                 info.Status.ThwargFilterVersion = SettingHelpers.GetSingleStringValue(settings, "ThwargFilterVersion");
                 info.Status.ThwargFilterFilePath = SettingHelpers.GetSingleStringValue(settings, "ThwargFilterFilePath");
                 info.Status.IsOnline = SettingHelpers.GetSingleBoolValue(settings, "IsOnline", false);
+                info.Status.LastServerDispatchSecondsAgo = SettingHelpers.GetSingleIntValue(settings, "LastServerDispatchSecondsAgo");
 
                 info.IsValid = true;
             }

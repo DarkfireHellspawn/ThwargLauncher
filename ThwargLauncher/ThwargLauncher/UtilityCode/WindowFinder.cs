@@ -19,12 +19,25 @@ namespace ThwargUtils
         protected static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         public static extern bool SetWindowText(IntPtr hwnd, String lpString);
+        [DllImport("user32.dll", EntryPoint = "SetWindowPos")]
+        public static extern IntPtr SetWindowPos(IntPtr hWnd, int hWndInsertAfter, int x, int y, int cx, int cy, int wFlags);
+        const short SWP_NOMOVE = 0X2;
+        const short SWP_NOSIZE = 1;
+        const short SWP_NOZORDER = 0X4;
+        const int SWP_SHOWWINDOW = 0x0040;
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
         #endregion API calls
 
         #region Members
         private Dictionary<IntPtr, int> _windowMap = null;
         #endregion Members
 
+        public WindowFinder()
+        {
+            RecordExistingWindows();
+        }
         #region Methods
         public void RecordExistingWindows()
         {
@@ -37,18 +50,32 @@ namespace ThwargUtils
                 }, IntPtr.Zero);
 
         }
-        public IntPtr FindNewWindow(System.Text.RegularExpressions.Regex regex)
+        public static string GetWindowTextString(IntPtr hWnd)
+        {
+            int size = GetWindowTextLength(hWnd);
+            if (size <= 0) { return null; }
+            StringBuilder sb = new StringBuilder(size + 1);
+            GetWindowText(hWnd, sb, size + 1);
+            return sb.ToString();
+        }
+        public IntPtr FindWindowByCaptionAndProcessId(System.Text.RegularExpressions.Regex regex, bool newWindow, int processId)
         {
             IntPtr foundWnd = IntPtr.Zero;
             EnumWindows((hWnd, lParam) =>
                 {
                     if (!IsWindowVisible(hWnd)) { return true; }
-                    if (_windowMap.ContainsKey(hWnd)) { return true; }
-                    int size = GetWindowTextLength(hWnd);
-                    if (size <= 0) { return true; }
-                    StringBuilder sb = new StringBuilder(size + 1);
-                    GetWindowText(hWnd, sb, size + 1);
-                    if (!regex.IsMatch(sb.ToString())) { return true; }
+                    if (newWindow)
+                    {
+                        if (_windowMap.ContainsKey(hWnd)) { return true; }
+                    }
+                    string caption = GetWindowTextString(hWnd);
+                    if (caption == null) { return true; }
+                    if (regex != null)
+                    {
+                        if (!regex.IsMatch(caption)) { return true; }
+                    }
+                    if (processId != 0 && GetWindowProcessId(hWnd) != processId) { return true; }
+                    // To check if main window, should check if window owner is itself
                     foundWnd = hWnd;
                     return false;
                 }, IntPtr.Zero);
@@ -57,6 +84,17 @@ namespace ThwargUtils
         public void SetWindowTitle(IntPtr hwnd, string title)
         {
             SetWindowText(hwnd, title);
+        }
+        public void SetWindowPosition(IntPtr hwnd, int x, int y, int cx, int cy)
+        {
+            int flags = SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW;
+            SetWindowPos(hwnd, 0, x, y, cx, cy, flags);
+        }
+        public int GetWindowProcessId(IntPtr hwnd)
+        {
+            uint processId = 0;
+            uint threadId = GetWindowThreadProcessId(hwnd, out processId);
+            return (int)processId;
         }
         #endregion Methods
     }

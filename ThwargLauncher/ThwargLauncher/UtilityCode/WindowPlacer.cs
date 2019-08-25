@@ -69,35 +69,54 @@ namespace WindowPlacementUtil
         private const int SW_SHOWNORMAL = 1;
         private const int SW_SHOWMINIMIZED = 2;
 
-        public static void SetPlacement(IntPtr windowHandle, string placementXml)
+        public static void SetPlacementString(IntPtr windowHandle, string placementXml)
         {
-            if (string.IsNullOrEmpty(placementXml))
+            WINDOWPLACEMENT placement = GetPlacementFromString(placementXml);
+            if (placement.length == 0) // flag for failure
             {
                 return;
             }
-
-            WINDOWPLACEMENT placement;
-            byte[] xmlBytes = encoding.GetBytes(placementXml);
-
-            try
+            SetWindowPlacement(windowHandle, ref placement);
+        }
+        public static void SetPlacement(IntPtr windowHandle, WINDOWPLACEMENT placement)
+        {
+            if (placement.length > 0)
             {
-                using (MemoryStream memoryStream = new MemoryStream(xmlBytes))
-                {
-                    placement = (WINDOWPLACEMENT)serializer.Deserialize(memoryStream);
-                }
-
-                placement.length = Marshal.SizeOf(typeof(WINDOWPLACEMENT));
-                placement.flags = 0;
-                placement.showCmd = (placement.showCmd == SW_SHOWMINIMIZED ? SW_SHOWNORMAL : placement.showCmd);
                 SetWindowPlacement(windowHandle, ref placement);
             }
-            catch (InvalidOperationException)
-            {
-                // Parsing placement XML failed. Fail silently.
-            }
         }
+        public static WINDOWPLACEMENT GetPlacementFromString(string placementXml)
+        {
+            WINDOWPLACEMENT placement = new WINDOWPLACEMENT();
+            placement.length = 0; // flag for failure
 
-        public static string GetPlacement(IntPtr windowHandle)
+            if (!string.IsNullOrEmpty(placementXml))
+            {
+
+                byte[] xmlBytes = encoding.GetBytes(placementXml);
+
+                try
+                {
+                    using (MemoryStream memoryStream = new MemoryStream(xmlBytes))
+                    {
+                        placement = (WINDOWPLACEMENT)serializer.Deserialize(memoryStream);
+                    }
+
+                    if (!(placement.normalPosition.Top == 0 && placement.normalPosition.Bottom == 0))
+                    {
+                        placement.length = Marshal.SizeOf(typeof(WINDOWPLACEMENT));
+                        placement.flags = 0;
+                        placement.showCmd = (placement.showCmd == SW_SHOWMINIMIZED ? SW_SHOWNORMAL : placement.showCmd);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // Parsing placement XML failed. Fail silently.
+                }
+            }
+            return placement;
+        }
+        public static string GetPlacementString(IntPtr windowHandle)
         {
             WINDOWPLACEMENT placement = new WINDOWPLACEMENT();
             GetWindowPlacement(windowHandle, out placement);
@@ -111,6 +130,29 @@ namespace WindowPlacementUtil
                     return encoding.GetString(xmlBytes);
                 }
             }
+        }
+        public class PlacementInfo
+        {
+            public WINDOWPLACEMENT Placement;
+            public string PlacementString;
+            public bool IsEmpty() { return Placement.normalPosition.Top == 0 && Placement.normalPosition.Bottom == 0; }
+        }
+        public static PlacementInfo GetPlacementInfo(IntPtr windowHandle)
+        {
+            var info = new PlacementInfo();
+            info.Placement = new WINDOWPLACEMENT();
+            GetWindowPlacement(windowHandle, out info.Placement);
+
+            using (MemoryStream memoryStream = new MemoryStream())
+            {
+                using (XmlTextWriter xmlTextWriter = new XmlTextWriter(memoryStream, Encoding.UTF8))
+                {
+                    serializer.Serialize(xmlTextWriter, info.Placement);
+                    byte[] xmlBytes = memoryStream.ToArray();
+                    info.PlacementString = encoding.GetString(xmlBytes);
+                }
+            }
+            return info;
         }
     }
 }

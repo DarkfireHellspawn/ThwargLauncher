@@ -114,6 +114,10 @@
     <Compile Include="AccountManagement\AddServer.xaml.cs">
       <DependentUpon>AddServer.xaml</DependentUpon>
     </Compile>
+    <Compile Include="AccountManagement\BrowseServer.xaml.cs">
+      <DependentUpon>BrowseServer.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="AccountManagement\BrowseServerViewModel.cs" />
     <Compile Include="AccountManagement\EditableAccountViewModel.cs" />
     <Compile Include="AccountManagement\EditCharactersViewModel.cs" />
     <Compile Include="AccountManagement\LoginCommands.xaml.cs">
@@ -135,6 +139,7 @@
     </Compile>
     <Compile Include="DiagnosticWindow\DiagnosticWindowViewModel.cs" />
     <Compile Include="GameLaunching\DecalInjection.cs" />
+    <Compile Include="GameLaunching\LaunchWorker.cs" />
     <Compile Include="GameManagement\CommandManager.cs" />
     <Compile Include="GameManagement\GameMonitor.cs" />
     <Compile Include="GameManagement\GameSession.cs" />
@@ -214,6 +219,10 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="AccountManagement\AddUsers.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="AccountManagement\BrowseServer.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -297,9 +306,6 @@
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Images\32pxDiscord.png" />
-    <Content Include="Images\acwallpaperwideaerbax.jpg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
     <Resource Include="ThwargLogo.ico" />
     <Resource Include="ToDo_List.txt" />
   </ItemGroup>
@@ -310,17 +316,18 @@
     <Resource Include="releasenotes.txt" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Images\acwallpaperwide10yrs.jpg">
+    <Content Include="Images\backgrounds\acwallpaperwide10yrs.jpg">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Images\acwallpaperwideaerfalle.jpg">
+    </Content>
+    <Content Include="Images\backgrounds\acwallpaperwideaerbax.jpg">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Images\acwallpaperwideGroup.jpg">
+    </Content>
+    <Content Include="Images\backgrounds\acwallpaperwideaerfalle.jpg">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </EmbeddedResource>
-  </ItemGroup>
-  <ItemGroup>
+    </Content>
+    <Content Include="Images\backgrounds\acwallpaperwideGroup.jpg">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <Content Include="Images\DecalSetting.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
@@ -355,6 +362,12 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="UtilityCode\DecalInjection\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SubProjects\Intelli.WPF.Controls\Intelli.WPF.Controls.csproj">
+      <Project>{769d993c-2867-4212-be80-b70e4862ebc5}</Project>
+      <Name>Intelli.WPF.Controls</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

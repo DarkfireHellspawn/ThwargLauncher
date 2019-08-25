@@ -12,8 +12,11 @@ namespace ThwargLauncher
     {
         public ObservableCollection<ServerModel> ServerList{ get; set; }
         public ICommand AddServerCommand { get; private set; }
+        public ICommand BrowseServerCommand { get; private set; }
         public Action CloseAction { get; set; }
         public bool AddServerRequested;
+        public bool ServersDeleted;
+        public bool BrowseServerRequested;
 
         public EditServersViewModel()
         {
@@ -23,6 +26,7 @@ namespace ThwargLauncher
                 ServerList.Add(server);
             }
             AddServerCommand = new DelegateCommand(AddNewServer);
+            BrowseServerCommand = new DelegateCommand(BrowseNewServer);
             ServerList.CollectionChanged += ServerList_CollectionChanged;
         }
         void ServerList_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
@@ -48,11 +52,17 @@ namespace ThwargLauncher
             foreach (var id in idsToDelete.Keys)
             {
                 ServerManager.DeleteServerById(id);
+                ServersDeleted = true;
             }
         }
         private void AddNewServer()
         {
             AddServerRequested = true;
+            if (CloseAction != null) { CloseAction(); }
+        }
+        private void BrowseNewServer()
+        {
+            BrowseServerRequested = true;
             if (CloseAction != null) { CloseAction(); }
         }
     }

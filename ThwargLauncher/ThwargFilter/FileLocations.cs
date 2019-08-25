@@ -16,23 +16,31 @@ namespace ThwargFilter
         /// <summary>
         /// Launch file contains instructions (character) name from ThwargLauncher.exe for ThwargFilter.dll
         /// </summary>
-        public static string GetCurrentLaunchFilePath()
+        public static string GetCurrentLaunchFilePath(string ServerName, string AccountName)
         {
-            string path = Path.Combine(AppFolder, FilterName + "_launch.txt");
+            string filename = string.Format("launch_{0}_{1}_{2}.txt", FilterName, ServerName, AccountName);
+            string directory = Path.Combine(AppFolder, "LaunchFiles");
+            string path = Path.Combine(directory, filename);
             return path;
         }
         /// <summary>
         /// Launch response file contains pid of game, given by ThwargFilter.dll to ThwargLauncher.exe
         /// </summary>
-        public static string GetCurrentLaunchResponseFilePath()
+        public static string GetCurrentLaunchResponseFilePath(string ServerName, string AccountName)
         {
-            string path = Path.Combine(AppFolder, FilterName + "_launchResponse.txt");
+            string filename = string.Format("launchResponse_{0}_{1}_{2}.txt", FilterName, ServerName, AccountName);
+            string directory = Path.Combine(AppFolder, "LaunchFiles");
+            string path = Path.Combine(directory, filename);
             return path;
         }
-
-        public static string GetCharacterFilePath()
+        public static System.Collections.Generic.List<string> GetAllCharacterFilePaths()
         {
-            string path = Path.Combine(AppFolder, "characters.txt");
+            return CharacterBook.EnumerateCharacterFilepaths();
+        }
+        public static string GetCharacterFilePath(string ServerName, string AccountName)
+        {
+            string filename = string.Format("characters_{0}_{1}.txt", ServerName, AccountName);
+            string path = Path.Combine(AppFolder, Path.Combine("characters", filename));
             return path;
         }
         public static string GetOldCharacterFilePath()
@@ -158,6 +166,25 @@ namespace ThwargFilter
             string pid = System.Diagnostics.Process.GetCurrentProcess().Id.ToString();
             filepath = filepath.Replace("%PID%", pid);
             return filepath;
+        }
+        public static void EnsureAllDataFoldersExist()
+        {
+            string[] folders = { "characters", "LaunchFiles", "Logs", "Profiles", "Running", "Servers" };
+            foreach (var folderName in folders)
+            {
+                string directory = Path.Combine(AppFolder, folderName);
+                FileLocations.EnsureFolderExists(directory);
+
+            }
+        }
+
+        internal static void EnsureFolderExists(string folder)
+        {
+            if (!Directory.Exists(folder))
+            {
+                Directory.CreateDirectory(folder);
+            }
+
         }
 
         public static void CreateAnyNeededFoldersOfFile(string filepath)

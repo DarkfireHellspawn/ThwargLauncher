@@ -1,20 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Diagnostics;
-using System.IO;
-using ThwargLauncher.AccountManagement;
-using ThwargLauncher.UtilityCode;
 using System.Windows.Navigation;
+using ThwargLauncher.AccountManagement;
 
 namespace ThwargLauncher
 {
@@ -24,24 +21,25 @@ namespace ThwargLauncher
     public partial class MainWindow : Window
     {
         //private Dictionary<string, List<AccountCharacter>> _allAccountCharacters;
-        
+
         private List<string> _Images = new List<string>();
         private Random _rand = new Random();
         private BackgroundWorker _worker = new BackgroundWorker();
-        private string _launcherLocation;
+        private string _clientExeLocation;
+
+        private bool _autoLaunchOnStart;
 
         private readonly MainWindowViewModel _viewModel;
         private readonly GameSessionMap _gameSessionMap;
         private readonly GameMonitor _gameMonitor;
+        private readonly LaunchWorker _launchWorker;
+
         readonly SynchronizationContext _uicontext;
-        private DateTime _launchRequestedTimeUtc = DateTime.MinValue;
-        private DateTime _lastLaunchInitiatedUtc = DateTime.MinValue;
         private System.Timers.Timer _timer;
-        private object _launchTimingLock = new object();
 
         public static string OldUsersFilePath = Path.Combine(Configuration.AppFolder, "UserNames.txt");
 
-        private System.Collections.Concurrent.ConcurrentQueue<LaunchItem> _launchConcurrentQueue = 
+        private System.Collections.Concurrent.ConcurrentQueue<LaunchItem> _launchConcurrentQueue =
             new System.Collections.Concurrent.ConcurrentQueue<LaunchItem>();
 
         internal MainWindow(MainWindowViewModel mainWindowViewModel, GameSessionMap gameSessionMap, GameMonitor gameMonitor)
@@ -55,12 +53,22 @@ namespace ThwargLauncher
 
             _gameSessionMap = gameSessionMap;
             _gameMonitor = gameMonitor;
+            _launchWorker = new LaunchWorker(_worker, _gameSessionMap);
+            _launchWorker.ReportAccountStatusEvent += (accountStatus, item) => UpdateAccountStatus(accountStatus, item);
+            _launchWorker.ProgressChangedEvent += _worker_ProgressChanged;
+            _launchWorker.WorkerCompletedEvent += _worker_RunWorkerCompleted;
             _uicontext = SynchronizationContext.Current;
 
             _viewModel.OpeningSimpleLauncherEvent += () => this.Hide();
             _viewModel.LaunchingSimpleGameEvent += (li) => this.LaunchSimpleClient(li);
 
-            CheckForProgramUpdate();
+            _autoLaunchOnStart = Properties.Settings.Default.AutoLaunchOnStart;
+
+            if (Properties.Settings.Default.AutoRelaunch)
+            {
+                CheckForProgramUpdate();
+            }
+
             InitializeComponent();
             DataContext = _viewModel;
             mainWindowViewModel.PropertyChanged += MainWindowViewModel_PropertyChanged;
@@ -73,12 +81,15 @@ namespace ThwargLauncher
             LoadImages();
             ChangeBackgroundImageRandomly();
 
-            WireUpBackgroundWorker();
             SubscribeToGameMonitorEvents();
             _timer = new System.Timers.Timer(5000); // every five seconds
             _timer.Elapsed += _timer_Elapsed;
             StartStopTimerIfAutoChecked();
-            
+
+            if(_autoLaunchOnStart)
+            {
+                LaunchGame();
+            }
 
             ThwargLauncher.AppSettings.WpfWindowPlacementSetting.Persist(this);
         }
@@ -108,22 +119,7 @@ namespace ThwargLauncher
         }
         private bool IsLaunchDue()
         {
-            lock (_launchTimingLock)
-            {
-                if (_launchRequestedTimeUtc > _lastLaunchInitiatedUtc)
-                {
-                    return true;
-                }
-                else
-                {
-                    var elapsed = DateTime.UtcNow - _lastLaunchInitiatedUtc;
-                    if (elapsed.TotalSeconds > ConfigSettings.GetConfigInt("RelaunchIntervalSeconds", 60))
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
+            return _launchWorker.IsLaunchDue();
         }
         private void SubscribeToGameMonitorEvents()
         {
@@ -135,7 +131,7 @@ namespace ThwargLauncher
         }
         private void _gameMonitor_GameDiedEvent(object sender, EventArgs e)
         {
-            _launchRequestedTimeUtc = DateTime.UtcNow;
+            _launchWorker.RequestImmediateLaunch();
         }
         private void InvokeLaunchOnAppropriateThread()
         {
@@ -199,10 +195,10 @@ namespace ThwargLauncher
         private void LoadImages()
         {
             _Images.Clear();
-            _Images.Add("acwallpaperwideaerbax.jpg");
-            _Images.Add("acwallpaperwideaerfalle.jpg");
-            _Images.Add("acwallpaperwideGroup.jpg");
-            _Images.Add("acwallpaperwide10yrs.jpg");
+            foreach(string filename in Directory.GetFiles("Images\\backgrounds\\", "*.jpg"))
+            {
+                _Images.Add(filename);
+            }
         }
 
         private string PickRandomImage()
@@ -213,14 +209,15 @@ namespace ThwargLauncher
         private void ChangeBackgroundImageRandomly()
         {
             LoadImages();
+            if(_Images.Count == 0) { return; }
             string imageName = PickRandomImage();
             //BigGrid.Background = MyTextBlock.Background;
             ImageBrush brush = new ImageBrush(
                 new BitmapImage(
-                    new Uri("Images\\" + imageName, UriKind.Relative)
+                    new Uri(imageName, UriKind.Relative)
                     ));
             ContentGrid.Background = brush;
-            
+
         }
 
         private void EnsureDataFoldersExist()
@@ -231,6 +228,8 @@ namespace ThwargLauncher
             {
                 Directory.CreateDirectory(specificFolder);
             }
+            // Ensure all data folders shared with filter exist
+            ThwargFilter.FileLocations.EnsureAllDataFoldersExist();
 
             // Ensure profiles folder exists
             var mgr = new ProfileManager();
@@ -295,15 +294,15 @@ namespace ThwargLauncher
         public void LaunchGame()
         {
             _viewModel.ClientFileLocation = txtLauncherLocation.Text;
-            _launcherLocation = _viewModel.ClientFileLocation;
-            if (string.IsNullOrEmpty(_launcherLocation))
+            _clientExeLocation = _viewModel.ClientFileLocation;
+            if (string.IsNullOrEmpty(_clientExeLocation))
             {
                 ShowErrorMessage("Game launcher location required");
                 return;
             }
-            if (!File.Exists(_launcherLocation))
+            if (!File.Exists(_clientExeLocation))
             {
-                ShowErrorMessage(string.Format("Game launcher missing: '{0}'", _launcherLocation));
+                ShowErrorMessage(string.Format("Game launcher missing: '{0}'", _clientExeLocation));
                 return;
             }
             if (!CheckAccountsAndPasswords())
@@ -354,14 +353,6 @@ namespace ThwargLauncher
             return true;
         }
 
-        private void WireUpBackgroundWorker()
-        {
-            _worker.WorkerReportsProgress = true;
-            _worker.WorkerSupportsCancellation = true;
-            _worker.DoWork += _worker_DoWork;
-            _worker.ProgressChanged += _worker_ProgressChanged;
-            _worker.RunWorkerCompleted += _worker_RunWorkerCompleted;
-        }
 
         private void _worker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
@@ -406,10 +397,6 @@ namespace ThwargLauncher
                 }
             }
         }
-        private class WorkerArgs
-        {
-            public System.Collections.Concurrent.ConcurrentQueue<LaunchItem> ConcurrentLaunchQueue;
-        }
         private void LaunchSimpleClient(LaunchItem launchItem)
         {
             if (_worker.IsBusy)
@@ -422,17 +409,13 @@ namespace ThwargLauncher
                 _launchConcurrentQueue.Enqueue(launchItem);
                 EnableInterface(false);
                 btnCancel.IsEnabled = true;
-                WorkerArgs args = new WorkerArgs()
-                {
-                    ConcurrentLaunchQueue = _launchConcurrentQueue
-                };
-                _worker.RunWorkerAsync(args);
+                _launchWorker.LaunchQueue(_launchConcurrentQueue, _clientExeLocation);
             }
         }
         private void LaunchAllClientsOnAllServersOnThread()
         {
             _viewModel.ClientFileLocation = txtLauncherLocation.Text;
-            _launcherLocation = _viewModel.ClientFileLocation;
+            _clientExeLocation = _viewModel.ClientFileLocation;
             if (_worker.IsBusy)
             {
                 lblWorkerProgress.Content = "Launcher In Use";
@@ -444,11 +427,7 @@ namespace ThwargLauncher
                 btnCancel.IsEnabled = true;
                 UpdateConcurrentQueue();
                 _viewModel.RecordProfileLaunch();
-                WorkerArgs args = new WorkerArgs()
-                    {
-                        ConcurrentLaunchQueue = _launchConcurrentQueue
-                    };
-                _worker.RunWorkerAsync(args);
+                _launchWorker.LaunchQueue(_launchConcurrentQueue, _clientExeLocation);
             }
         }
         private void UpdateConcurrentQueue()
@@ -489,22 +468,23 @@ namespace ThwargLauncher
                                 continue;
                             }
                             var launchItem = new LaunchItem()
-                                {
-                                    AccountName = account.Name,
-                                    Priority = account.Priority,
-                                    Password = account.Password,
-                                    ServerName = server.ServerName,
-                                    IpAndPort = server.ServerIpAndPort,
-                                    GameApiUrl = server.GameApiUrl,
-                                    LoginServerUrl = server.LoginServerUrl,
-                                    DiscordUrl = server.DiscordUrl,
-                                    EMU = server.EMU,
-                                    CharacterSelected = server.ChosenCharacter,
-                                    CustomLaunchPath = account.CustomLaunchPath,
-                                    CustomPreferencePath = account.CustomPreferencePath,
-                                    RodatSetting = server.RodatSetting,
-                                    SecureSetting = server.SecureSetting
-                                };
+                            {
+                                Alias = account.Alias,
+                                AccountName = account.Name,
+                                Priority = account.Priority,
+                                Password = account.Password,
+                                ServerName = server.ServerName,
+                                IpAndPort = server.ServerIpAndPort,
+                                GameApiUrl = server.GameApiUrl,
+                                LoginServerUrl = server.LoginServerUrl,
+                                DiscordUrl = server.DiscordUrl,
+                                EMU = server.EMU,
+                                CharacterSelected = server.ChosenCharacter,
+                                CustomLaunchPath = account.CustomLaunchPath,
+                                CustomPreferencePath = account.CustomPreferencePath,
+                                RodatSetting = server.RodatSetting,
+                                SecureSetting = server.SecureSetting
+                            };
                             launchList.Add(launchItem);
                         }
                     }
@@ -524,81 +504,10 @@ namespace ThwargLauncher
                 info.Message
                 );
         }
-
-        void workerReportProgress(string verb, LaunchItem launchItem, int index, int total)
-        {
-            int pct = (int)(100.0 * index / total);
-            string context = string.Format(
-                "{0} {1}:{2}",
-                verb, launchItem.AccountName, launchItem.ServerName);
-            var progressInfo = new ProgressInfo()
-                {
-                    Index = index,
-                    Total = total,
-                    Message = context
-                };
-            _worker.ReportProgress(pct, progressInfo);
-        }
-        void _worker_DoWork(object sender, DoWorkEventArgs e)
-        {
-            WorkerArgs args = (e.Argument as WorkerArgs);
-            if (args == null) { return; }
-            lock (_launchTimingLock)
-            {
-                _lastLaunchInitiatedUtc = DateTime.UtcNow;
-            }
-            int serverIndex = 0;
-            System.Collections.Concurrent.ConcurrentQueue<LaunchItem> globalQueue = args.ConcurrentLaunchQueue;
-            int serverTotal = globalQueue.Count;
-            if (serverTotal == 0) { return; }
-
-            LaunchItem launchItem = null;
-            var accountLaunchTimes = _gameSessionMap.GetLaunchAccountTimes();
-
-            while (globalQueue.TryDequeue(out launchItem))
-            {
-                LaunchManager mgr = new LaunchManager(_launcherLocation, launchItem, accountLaunchTimes);
-                mgr.ReportStatusEvent += (status, item) => HandleLaunchMgrStatus(status, item, serverIndex, serverTotal);
-                LaunchManager.LaunchManagerResult launchResult;
-                GameSession session = null;
-                try
-                {
-                    session = _gameSessionMap.StartLaunchingSession(launchItem.ServerName, launchItem.AccountName);
-                    UpdateAccountStatus(ServerAccountStatusEnum.Starting, launchItem);
-                    launchResult = mgr.LaunchGameHandlingDelaysAndTitles(_worker);
-                }
-                finally
-                {
-                    _gameSessionMap.EndLaunchingSession(launchItem.ServerName, launchItem.AccountName);
-                }
-
-                if (launchResult.Success)
-                {
-                    ++serverIndex;
-                    // Let's just wait for game monitor to check if the character list changed
-                    // b/c the AccountManager is subscribed for that event
-                    //CallUiNotifyAvailableCharactersChanged(); // Pick up any characters - experimental 2017-04-10
-                    // CallUiLoadUserAccounts(); // Pick up any characters - before 2017-04-10
-                    _gameSessionMap.StartSessionWatcher(session);
-                    workerReportProgress("Launched", launchItem, serverIndex, serverTotal);
-                }
-
-                if (_worker.CancellationPending)
-                {
-                    e.Cancel = true;
-                    return;
-                }
-            }
-        }
         private void UpdateAccountStatus(ServerAccountStatusEnum status, LaunchItem launchItem)
         {
             _viewModel.UpdateAccountStatus(launchItem.ServerName, launchItem.AccountName, status);
         }
-        private void HandleLaunchMgrStatus(string status, LaunchItem launchItem, int serverIndex, int serverTotal)
-        {
-            workerReportProgress(status, launchItem, serverIndex, serverTotal);
-        }
-
         public static void ShowErrorMessage(string msg)
         {
             ShowMessage(msg, "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -635,7 +544,7 @@ namespace ThwargLauncher
             _viewModel.WindowClosing();
 
             Properties.Settings.Default.SelectedUser = lstUsername.SelectedIndex;
-            
+
             Properties.Settings.Default.Save();
         }
 
@@ -680,7 +589,7 @@ namespace ThwargLauncher
             MainWindowDisable();
 
             var startInfo = new ProcessStartInfo("notepad", AccountParser.AccountFilePath);
-            var notepadProcess = new Process() {StartInfo = startInfo};
+            var notepadProcess = new Process() { StartInfo = startInfo };
             if (notepadProcess.Start())
             {
                 notepadProcess.WaitForExit();
@@ -691,7 +600,7 @@ namespace ThwargLauncher
         private void btnEditUsers_Click(object sender, RoutedEventArgs e)
         {
             AccountEditorViewModel acevm = new AccountEditorViewModel(this._viewModel.KnownUserAccounts.Select(x => x.Account));
-            
+
             AccountEditor dlg = new AccountEditor();
             dlg.DataContext = acevm;
             dlg.ShowDialog();
@@ -738,6 +647,23 @@ namespace ThwargLauncher
                     LoadUserAccounts(initialLoad: false);
                 }
             }
+            else if (vm.BrowseServerRequested)
+            {
+                var bsvm = new BrowseServerViewModel();
+                var dlg = new BrowseServer();
+                dlg.DataContext = bsvm;
+                var result = dlg.ShowDialog();
+                // Save any changes the user made to disk
+                ServerManager.SaveServerListToDisk();
+                // In case user added any servers
+                PopulateServerList();
+                LoadUserAccounts(initialLoad: false);
+            }
+            else if (vm.ServersDeleted)
+            {
+                PopulateServerList();
+                LoadUserAccounts(initialLoad: false);
+            }
             MainWindowEnable();
         }
         private void btnSimpleLaunch_Click(object sender, RoutedEventArgs e)
@@ -758,7 +684,7 @@ namespace ThwargLauncher
 
         private void CheckRelaunch()
         {
-            
+
         }
         private void RequestNavigateHandler(object sender, RequestNavigateEventArgs e)
         {
@@ -767,9 +693,22 @@ namespace ThwargLauncher
                 Process.Start(new ProcessStartInfo(e.Uri.OriginalString));
                 e.Handled = true;
             }
-            catch(Exception exc)
+            catch (Exception exc)
             {
                 MessageBox.Show("Url is not valid. Click the 'Edit Servers' button, and verify your DiscordUrl.", "Invalid URL");
+            }
+        }
+
+        private void ListBox_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (!e.Handled)
+            {
+                e.Handled = true;
+                var eventArg = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta);
+                eventArg.RoutedEvent = UIElement.MouseWheelEvent;
+                eventArg.Source = sender;
+                var parent = ((Control)sender).Parent as UIElement;
+                parent.RaiseEvent(eventArg);
             }
         }
     }

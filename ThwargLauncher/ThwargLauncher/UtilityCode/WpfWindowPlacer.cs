@@ -10,7 +10,7 @@ namespace WindowPlacementUtil
         {
             try
             {
-                WindowPlacement.SetPlacement(new WindowInteropHelper(window).Handle, placementXml);
+                WindowPlacement.SetPlacementString(new WindowInteropHelper(window).Handle, placementXml);
             }
             catch
             {
@@ -19,7 +19,7 @@ namespace WindowPlacementUtil
 
         public static string GetPlacement(this Window window)
         {
-            return WindowPlacement.GetPlacement(new WindowInteropHelper(window).Handle);
+            return WindowPlacement.GetPlacementString(new WindowInteropHelper(window).Handle);
         }
     }
 }

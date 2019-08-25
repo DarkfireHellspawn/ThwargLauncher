@@ -12,7 +12,7 @@ namespace ThwargLauncher.Properties {
     
     
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "15.3.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "15.9.0.0")]
     internal sealed partial class Settings : global::System.Configuration.ApplicationSettingsBase {
         
         private static Settings defaultInstance = ((Settings)(global::System.Configuration.ApplicationSettingsBase.Synchronized(new Settings())));
@@ -248,6 +248,52 @@ namespace ThwargLauncher.Properties {
             }
             set {
                 this["ShowPassword"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool SaveGameWindows {
+            get {
+                return ((bool)(this["SaveGameWindows"]));
+            }
+            set {
+                this["SaveGameWindows"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool RestoreGameWindows {
+            get {
+                return ((bool)(this["RestoreGameWindows"]));
+            }
+            set {
+                this["RestoreGameWindows"] = value;
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("https://raw.githubusercontent.com/Thwargle/ThwargLauncher/master/ThwargLauncher/T" +
+            "hwargLauncher/ServerLists/WildWestPublishedServerInfo.xml")]
+        public string WildWestServerListUrl {
+            get {
+                return ((string)(this["WildWestServerListUrl"]));
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool AutoLaunchOnStart {
+            get {
+                return ((bool)(this["AutoLaunchOnStart"]));
+            }
+            set {
+                this["AutoLaunchOnStart"] = value;
             }
         }
     }

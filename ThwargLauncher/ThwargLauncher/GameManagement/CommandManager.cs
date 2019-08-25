@@ -58,6 +58,22 @@ namespace ThwargLauncher
             {
                 HandleKillAllClientsCommand(commandString);
             }
+            else if (IsCommandPrefix(command, "addlogincmd ", ref commandString))
+            {
+                HandleAddLoginCmdCommand(inboundGameSession, commandString);
+            }
+            else if (eqstr(command, "disablewindowposition"))
+            {
+                HandleDisableWindowPositionCommand(inboundGameSession, commandString);
+            }
+            else if (eqstr(command, "lockwindowposition"))
+            {
+                HandleLockWindowPositionCommand(inboundGameSession, commandString);
+            }
+            else if (eqstr(command, "unlockwindowposition"))
+            {
+                HandleUnlockWindowPositionCommand(inboundGameSession, commandString);
+            }
         }
         private class TeamParsedCommand
         {
@@ -125,6 +141,31 @@ namespace ThwargLauncher
         {
             // Currently no arguments to parse
             _gameMonitor.KillAllSessionsAndNotify();
+        }
+        private void HandleDisableWindowPositionCommand(GameSession inboundGameSession, string commandString)
+        {
+            // Currently no arguments to parse
+            _gameMonitor.DisableWindowPosition(inboundGameSession);
+        }
+        private void HandleLockWindowPositionCommand(GameSession inboundGameSession, string commandString)
+        {
+            // Currently no arguments to parse
+            _gameMonitor.LockWindowPosition(inboundGameSession);
+        }
+        private void HandleUnlockWindowPositionCommand(GameSession inboundGameSession, string commandString)
+        {
+            // Currently no arguments to parse
+            _gameMonitor.UnlockWindowPosition(inboundGameSession);
+        }
+        private string CmdQueueToString(Queue<string> cmds) { return string.Join("\r\n", cmds); }
+        private void HandleAddLoginCmdCommand(GameSession session, string commandString)
+        {
+            Logger.WriteError("TODO: Implement HandleAddLoginCmdCommand");
+            var cmds = ThwargFilter.LoginCommandsStorage.GetLoginCommands(session.AccountName, session.ServerName, session.CharacterName);
+            cmds.Commands.Enqueue(commandString);
+            string newCmdListString = CmdQueueToString(cmds.Commands);
+            int waitTimeMs = cmds.WaitMillisencds;
+            ThwargFilter.LoginCommandsStorage.SetLoginCommands(session.AccountName, session.ServerName, session.CharacterName, newCmdListString, waitTimeMs);
         }
         private void HandleCreateTeamCommand(GameSession inboundGameSession, string commandString)
         {
